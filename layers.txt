@@ -1,0 +1,62 @@
+a = 30 nm
+b_1 = 20-50 nm
+b_2 = 100-125 nm
+c = 5 nm
+d = 50 nm
+
+no. melanosome layers = 12
+
+in the melanosome layers, each melanosome plus surrounding keratain occupies a
+square with area (1000 nm)^2, with an outside keratin fraction:
+f_k = 0.05
+
+or, the melanosome area was a square with size:
+w = 975 nm
+
+e = 10 nm
+N = 10
+=> (N + 1)^2 = 121 square air holes
+
+resulting in:
+f_m = 0.40
+f_a = 0.55
+
+n = A + Bλ^−2
+
+keratin
+A_k = 1.532
+B_k = 5890 nm^-2
+
+imaginary component taken to be negligible
+
+melanin
+A_m = 1.648
+B_m = 23700 nm^-2
+
+imaginary component
+k_m = a_m * exp(-λ / b_m)
+a_m = 0.56
+b_m = 270 nm
+
+barbule sliced into 10 nm thick layers
+
+f_k + f_m + f_a = 1
+
+the effective refractive index of each slice, and thus the barbule's refractive
+index profile:
+n_eff = f_k*n_k + f_m*(n_m - i*k_m) + f_a*n_a
+
+
+
+case 1
+5 nm keratin
+
+melanosome layer - membrane thickness 30 nm, 50 nm thick air compartments
+
+50 nm keratin
+
+x11
+
+melanosome layer - membrance thickenss 30 nm, 100 nm thick air compartments
+
+50 nm
