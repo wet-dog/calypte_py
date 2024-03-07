@@ -55,9 +55,9 @@
         <ref name="reflectance" id="texture-checkerboard" />
     </bsdf>
 
-    <bsdf type="plastic" id="bsdf-matpreview">
-        <rgb name="diffuse_reflectance" value="0.240, 0.771, 0.361" />
-        <float name="int_ior" value="1.9" />
+    <bsdf type="mybsdf" id="bsdf-matpreview">
+        <string name="int_ior" value="water"/>
+        <string name="ext_ior" value="air"/>
     </bsdf>
 
     <shape type="serialized" id="shape-plane">
