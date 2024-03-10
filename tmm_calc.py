@@ -6,115 +6,149 @@ import numpy as np
 from scipy import interpolate
 import matplotlib.pyplot as plt
 
+from enum import Enum
 from typing import NamedTuple
 
-class Parameters(NamedTuple):
-    f_k: int
-    n_k: int
-    f_m: int
-    n_m: int
-    k_m: int
-    f_a: int
-    n_a: int
+from tmm_fast import coh_tmm
 
-class Melanosome(NamedTuple):
-    top_membrane: complex
-    internal_layer: complex
-    bottom_membrane: complex
+parameters_t = np.dtype([
+    ("f_k", "f4"),
+    ("n_k", "f4"),
+    ("f_m", "f4"),
+    ("n_m", "f4"),
+    ("k_m", "c8"),
+    ("f_a", "f4"),
+    ("n_a", "f4"),
+])
 
-def cauchy(A, B, wavelength):
-    return A + B*wavelength**-2
+class Material(Enum):
+    KERATIN = 1
+    MELANIN_MEMBRANE = 2
+    MELANIN_INTERNAL = 3
+    AIR = 4
 
-def melanin_imaginary(wavelength):
+def cauchy(A, B, wavelengths):
+    return A + B*wavelengths**-2
+
+def melanin_imaginary(wavelengths):
     a_m = 0.56
     b_m = 270
-    return a_m * math.exp(-wavelength / b_m)
+    return a_m * np.exp(-wavelengths / b_m) * 1.0j
 
-def keratin_index(wavelength):
+def keratin_index(wavelengths):
     A_k = 1.532
     B_k = 5890
-    return cauchy(A_k, B_k, wavelength)
+    return cauchy(A_k, B_k, wavelengths)
 
-def melanin_index(wavelength):
+def melanin_index(wavelengths):
     A_m = 1.648
     B_m = 23700
-    return cauchy(A_m, B_m, wavelength)
+    return cauchy(A_m, B_m, wavelengths)
 
-def calc_melanosome_internal_layer_index(wavelength):
-    f_k = 0.05
-    n_k = keratin_index(wavelength)
-    f_m = 0.4
-    n_m = melanin_index(wavelength)
-    k_m = melanin_imaginary(wavelength)
-    f_a = 0.55
-    n_a = 1
-    return Parameters(f_k, n_k, f_m, n_m, k_m, f_a, n_a)
+def calc_keratin_layer(wavelengths):
+    parameters = np.zeros(wavelengths.shape, dtype=parameters_t)
+    parameters["f_k"] = 1
+    parameters["n_k"] = keratin_index(wavelengths)
+    parameters["f_m"] = 0
+    parameters["n_m"] = 0
+    parameters["k_m"] = 0
+    parameters["f_a"] = 0
+    parameters["n_a"] = 0
+    return parameters
 
-def calc_keratin_layer(wavelength):
-    f_k = 1
-    n_k = keratin_index(wavelength)
-    f_m = 0
-    n_m = 0
-    k_m = 0
-    f_a = 0
-    n_a = 0
-    return Parameters(f_k, n_k, f_m, n_m, k_m, f_a, n_a)
+def calc_melanin_layer(wavelengths):
+    parameters = np.zeros(wavelengths.shape, dtype=parameters_t)
+    parameters["f_k"] = 0
+    parameters["n_k"] = 0
+    parameters["f_m"] = 1
+    parameters["n_m"] = melanin_index(wavelengths)
+    parameters["k_m"] = melanin_imaginary(wavelengths)
+    parameters["f_a"] = 0
+    parameters["n_a"] = 0
+    return parameters
 
-def calc_melanin_layer(wavelength):
-    f_k = 0
-    n_k = 0
-    f_m = 1
-    n_m = melanin_index(wavelength)
-    k_m = melanin_imaginary(wavelength)
-    f_a = 0
-    n_a = 0
-    return Parameters(f_k, n_k, f_m, n_m, k_m, f_a, n_a)
+def calc_melanosome_internal_layer_index(wavelengths):
+    parameters = np.zeros(wavelengths.shape, dtype=parameters_t)
+    parameters["f_k"] = 0.05
+    parameters["n_k"] = keratin_index(wavelengths)
+    parameters["f_m"] = 0.4
+    parameters["n_m"] = melanin_index(wavelengths)
+    parameters["k_m"] = melanin_imaginary(wavelengths)
+    parameters["f_a"] = 0.55
+    parameters["n_a"] = 1
+    return parameters
 
-def calc_refractive_index(params: Parameters):
-    n_eff = (params.f_k*params.n_k
-            + params.f_m*(params.n_m - complex(params.k_m))
-            + params.f_a*params.n_a)
+def calc_refractive_index(parameters):
+    n_eff = (
+        parameters["f_k"] * parameters["n_k"]
+        + parameters["f_m"] * (parameters["n_m"] + parameters["k_m"])
+        + parameters["f_a"] * parameters["n_a"]
+    )
 
     return n_eff
 
-if __name__ == "__main__":
-    f_m = 0
-    wavelength = 500
-    keratin_layer_index = calc_refractive_index(calc_keratin_layer(wavelength))
-    melanosome_membrane_index = calc_refractive_index(calc_melanin_layer(wavelength))
-    melanosome_internal_index = calc_refractive_index(calc_melanosome_internal_layer_index(wavelength))
-
+def calc_layers(wavelengths):
     # Thicknesses in nm
     keratin_cortex_thickness = 5
     keratin_separation_thickness = 50
     melanosome_membrane_thickness = 30
-    melanosome_internal_thickness = 50
-    top_melanosome_internal_thickness = 100
+    # Note: this can be changed to adjust periodicity
+    melanosome_internal_thickness = 100
+    top_melanosome_internal_thickness = 50
 
+    air_layer_indices = np.ones(wavelengths.shape)
+    keratin_layer_indices = calc_refractive_index(calc_keratin_layer(wavelengths))
+    melanosome_membrane_indices = calc_refractive_index(calc_melanin_layer(wavelengths))
+    melanosome_internal_indices = calc_refractive_index(calc_melanosome_internal_layer_index(wavelengths))
+
+    # Init layers to first infinite air layer
+    layers = [[Material.AIR, np.inf]]
+
+    # Add keratin cortex layer
+    layers.append([Material.KERATIN, keratin_cortex_thickness])
+
+    # Add top melanosome layer
+    layers.append([Material.MELANIN_MEMBRANE, melanosome_membrane_thickness])
+    layers.append([Material.MELANIN_INTERNAL, top_melanosome_internal_thickness])
+    layers.append([Material.MELANIN_MEMBRANE, melanosome_membrane_thickness])
+
+    # Add the rest of the keratin separation and melanosome layers
     melanosome_layers = 12
+    melanosome_layers -= 1  # Because of the top melanosome layer
+    for _ in range(melanosome_layers):
+        layers.append([Material.KERATIN, keratin_separation_thickness])
+        layers.append([Material.MELANIN_MEMBRANE, melanosome_membrane_thickness])
+        layers.append([Material.MELANIN_INTERNAL, melanosome_internal_thickness])
+        layers.append([Material.MELANIN_MEMBRANE, melanosome_membrane_thickness])
 
-    melanosome = Melanosome(melanosome_membrane_index, melanosome_internal_index, melanosome_membrane_index)
+    # Add keratin cortex layer
+    layers.append([Material.KERATIN, keratin_cortex_thickness])
 
-    print("keratin refractive index", keratin_layer_index)
-    print("melanosome membrane refractive index", melanosome_membrane_index)
-    print("melanosome internal layer index", melanosome_internal_index)
+    # Add last infinite air layer
+    layers.append([Material.AIR, np.inf])
 
-    #index of refraction of my material: wavelength in nm versus index.
-    material_nk_data = np.array([[200, 2.1+0.1j],
-                            [300, 2.4+0.3j],
-                            [400, 2.3+0.4j],
-                            [500, 2.2+0.4j],
-                            [750, 2.2+0.5j]])
-    material_nk_fn = interpolate.interp1d(material_nk_data[:,0].real,
-                            material_nk_data[:,1], kind='quadratic')
-    d_list = [np.inf,300,np.inf] #in nm
-    lambda_list = np.linspace(200,750,400) #in nm
-    T_list = []
-    for lambda_vac in lambda_list:
-        n_list = [1, material_nk_fn(lambda_vac), 1]
-        T_list.append(tmm.coh_tmm('s',n_list,d_list,0,lambda_vac)['T'])
-    plt.figure()
-    plt.plot(lambda_list,T_list)
-    plt.xlabel('Wavelength (nm)')
-    plt.ylabel('Fraction of power transmitted')
-    plt.title('Transmission at normal incidence')
+    layers = np.array(layers)
+
+    layers_indices = np.empty((layers.shape[0], wavelengths.size), dtype=np.complex64)
+    layers_indices[layers[:, 0] == Material.AIR] = air_layer_indices
+    layers_indices[layers[:, 0] == Material.KERATIN] = keratin_layer_indices
+    layers_indices[layers[:, 0] == Material.MELANIN_MEMBRANE] = melanosome_membrane_indices
+    layers_indices[layers[:, 0] == Material.MELANIN_INTERNAL] = melanosome_internal_indices
+
+    return layers[:, 1], layers_indices
+
+
+
+if __name__ == "__main__":
+    wavelengths = np.linspace(300, 800, 800)
+    thetas = np.deg2rad(np.arange(0, 90, 20))
+
+    d_list, n_list = calc_layers(wavelengths)
+
+    d_list = np.expand_dims(d_list, axis=0).astype(np.float32)
+    n_list = np.expand_dims(n_list, axis=0)
+
+    polarization = "s"
+    O = coh_tmm(polarization, n_list, d_list, thetas, wavelengths, device="cpu")
+
+    print(O["R"])
